@@ -1,11 +1,12 @@
 '''
 Created on Jan 25, 2019
 
-@author: cmihaigabriel
-@version: v2.0
+@author: cmihaigabriel@gmail.com
+@version: v2.1
 
 @change: v1.0 used in 2019 SI IJCV
-@change: v2.0 used in 2019 Fusion Paper
+@change: v2.0 used in 2020 ICMR
+@change: v2.1 used in 2020 ECCV
 '''
 
 import pathlib
@@ -17,12 +18,13 @@ import numpy
 from builtins import str
 import subprocess
 import re
+from scipy.stats.mstats import pearsonr
 
 class FileHandler ():
     '''
-    Handles operations for the interestingness run files:
+    Handles operations for the run files:
     - loading all run files in a matrix
-    - sorting the matrix according to MAP / MAP@10 scores of each run
+    - sorting the matrix according to METRIC scores of each run
     - saving a final file with the final prediction values, to be used after running the fusion algoritm
     '''
     
@@ -62,10 +64,17 @@ class FileHandler ():
         @param metrictype: int: the type of calculated metric:
                                 - 0 MAP
                                 - 1 MAP@10
+                                - 2
+                                - 3 MSE and PCC - quite simple therefore used the direct formula
+                                - 4 IoU
         @param competitioncode : int : the code of the competition:
                                 - 0 INT2017.Video
                                 - 1 INT2017.Image
                                 - 2 VSD2015
+                                - 3 MEDCapt2019
+                                - 4 EMOAroVal2018.Arousal
+                                - 5 EMOAroVal2018.Valence
+                                - 6 EMOFear2018
         '''
         self.loadfolder = loadf
         self.savefolder = savef
@@ -89,7 +98,8 @@ class FileHandler ():
                         : implemented 1 = MediaEval Interestingness
         '''
         self.warnings = 0
-        
+        self.gtfilenames = self.process_GtFilenames(self.gtdata)
+
         #
         # INT2017.Video or INT2017.Image
         #
@@ -100,16 +110,14 @@ class FileHandler ():
                 froot = filename.split(os.extsep)[0]
                 fext = pathlib.Path(filename).suffix
                 
-                self.gtfilenames = self.processInterest_QrelsGtFilenames(self.gtdata)
-                
                 if (fext == '.log'):
-                    mapmetric = self.processInterest_LogMap(f)
+                    mapmetric = self.process_LogScore(f)
                     #print('Processing MAPS16 @ ... ' + f + ' with MAP = ' + str(mapmetric))
                     self.updateRunCollection(froot, mapmetric, None, None, None, None)
                 
                 if (fext == '.txt') :
                     print(f)
-                    scores = self.processInterest_CsvScores(f)
+                    scores = self.process_CsvScores(f)
                     #print('Processed Scores @ ... ' + f)
                     scoresNormed, runmin, runmax = self.normalizeScores(0, 1, scores)
                     self.updateRunCollection(froot, None, scores, runmin, runmax, scoresNormed)
@@ -124,18 +132,69 @@ class FileHandler ():
                 froot = filename.split(os.extsep)[0]
                 fext = pathlib.Path(filename).suffix
                 
-                self.gtfilenames = self.processInterest_QrelsGtFilenames(self.gtdata)
-                
                 if (fext == '.log'):
-                    mapmetric = self.processInterest_LogMap(f)
+                    mapmetric = self.process_LogScore(f)
                     #print('Processing MAPS16 @ ... ' + f + ' with MAP = ' + str(mapmetric))
                     self.updateRunCollection(froot, mapmetric, None, None, None, None)
                 
                 if (fext == '.txt') :
                     print(f)
-                    scores = self.processInterest_CsvScores(f)
+                    scores = self.process_CsvScores(f)
                     #print('Processed Scores @ ... ' + f)
-                    scoresNormed, runmin, runmax = self.normalizeScores(0, 1, scores)
+                    scoresNormed, runmin, runmax = self.normalizeScores(-1, 1, scores)
+                    self.updateRunCollection(froot, None, scores, runmin, runmax, scoresNormed)
+
+        #
+        # EMOAroval2018.Arousal and EMOAroval2018.Valence
+        #
+        if self.competitioncode == 4 or self.competitioncode == 5:
+            allfiles = [f for f in sorted(listdir(self.loadfolder)) if isfile(join(self.loadfolder, f))]
+            for filename in allfiles:
+                f = join(self.loadfolder, filename)
+                froot = filename.split(os.extsep)[0]
+                fext = pathlib.Path(filename).suffix
+
+                if (fext == '.alog' and self.competitioncode == 4):
+                    mapmetric = self.process_LogScore(f)
+                    print('processing alog')
+                    self.updateRunCollection(froot, mapmetric, None, None, None, None)
+
+                if (fext == '.vlog' and self.competitioncode == 5):
+                    mapmetric = self.process_LogScore(f)
+                    print('processing vlog')
+                    self.updateRunCollection(froot, mapmetric, None, None, None, None)
+
+                if (fext == '.txtnew') :
+                    print(f)
+                    scores = self.process_CsvScores(f)
+                    #no normalization for these tasks
+                    #scoresNormed, runmin, runmax = self.normalizeScores(0, 1, scores)
+                    runmin = self.findMinimumList(scores)
+                    runmax = self.findMaximumList(scores)
+                    scoresNormed = scores
+                    self.updateRunCollection(froot, None, scores, runmin, runmax, scoresNormed)
+
+        #
+        # EMOFear2018
+        #
+        if self.competitioncode == 6:
+            allfiles = [f for f in sorted(listdir(self.loadfolder)) if isfile(join(self.loadfolder, f))]
+            for filename in allfiles:
+                f = join(self.loadfolder, filename)
+                froot = filename.split(os.extsep)[0]
+                fext = pathlib.Path(filename).suffix
+
+                if (fext == '.log'):
+                    mapmetric = self.process_LogScore(f)
+                    print('processing log')
+                    self.updateRunCollection(froot, mapmetric, None, None, None, None)
+
+                if (fext == '.txt2'):
+                    print(f)
+                    scores = self.process_CsvScores(f)
+                    runmin = 0
+                    runmax = 1
+                    scoresNormed = scores
                     self.updateRunCollection(froot, None, scores, runmin, runmax, scoresNormed)
          
         #
@@ -143,7 +202,10 @@ class FileHandler ():
         #
         print('Finished processing files')
         
-        self.runcollection_sorted = self.sortRunCollection(self.runcollection, 1)
+        if self.competitioncode in [4,5] :
+            self.runcollection_sorted = self.sortRunCollection(self.runcollection, 0)
+        else:
+            self.runcollection_sorted = self.sortRunCollection(self.runcollection, 1)
            
         if (self.warnings > 0):
             print(self.warntext)
@@ -305,12 +367,14 @@ class FileHandler ():
         return mapret
 
 
-    '''-------------
+    '''
+    -------------
     Individual filetype processors
-    -------------'''
-    def processInterest_CsvScores (self, filename):
+    -------------
+    '''
+    def process_CsvScores (self, filename):
         '''
-        processes a INTERESTINGNESS CSV Score File
+        processes a CSV-ish score file for a certain RUN
         @param filename: str: the file
         @return: scores: list of floats: the loaded score values
         '''
@@ -361,28 +425,95 @@ class FileHandler ():
                     scores.append(score_dict[samplesearch])
                 else:
                     scores.append(minscore)            
+
+        #
+        # EMOAroval2018.Arousal and EMOAroval2018.Valence
+        #
+        if self.competitioncode == 4 or self.competitioncode == 5:
+            with open(filename, mode='r') as f:
+                csv_reader = csv.DictReader(f, fieldnames=('movie', 'valence', 'arousal'), delimiter = ',')
+                for row in csv_reader:
+                    samplename = row['movie']
+                    score = 0.0
+                    if self.competitioncode == 4:
+                        score = float(row['arousal'])
+                    else:
+                        score = float(row['valence'])
+                    score_dict[samplename] = score
+
+                #this rewrite will create a better type of scorefile that is easier to handle
+                #remember to comment it out along with junks
+                #self.junk_SaveNewtypeCsv(filename,junkname,junkval,junkaro)
+
+            minscore = self.findMinimumDict(score_dict)
+
+            for i in range(len(self.gtfilenames)):
+                samplesearch = self.gtfilenames[i]
                 
+                if samplesearch in score_dict:
+                    scores.append(score_dict[samplesearch])
+                else:
+                    scores.append(0.0)
+
+        #
+        # EMOFear2018
+        #
+        if self.competitioncode == 6:
+            with open(filename, mode='r') as f:
+                csv_reader = csv.DictReader(f, fieldnames=('samplename', 'score'), delimiter = ',')
+                for row in csv_reader:
+                    samplename = row['samplename']
+                    score = int(row['score'])
+                    score_dict[samplename] = score
+
+            minscore = 0
+
+            for i in range(len(self.gtfilenames)):
+                samplesearch = self.gtfilenames[i]
+
+                if samplesearch in score_dict:
+                    scores.append(score_dict[samplesearch])
+                else:
+                    scores.append(0.0)
+
         return scores
     
-    def processInterest_LogMap(self, filename):
+    def process_LogScore(self, filename):
         '''
-        process the INTERESTINGNESS LOG file, searching for MAP
+        process the LOG file, searching for METRIC for a certain RUN
         @param filename: str: the file
-        @return: mapmetric: float: the corresponding map 
+        @return: mapmetric: float: the corresponding METRIC score
         '''
         mapmetric = 0.0
-        with open(filename, mode='r') as f:
-            csv_reader = csv.DictReader(f, fieldnames=('metric', 'video', 'score'), delimiter = '\t')
-            for row in csv_reader :
-                if ( (row['metric']).strip() == 'map' ) and ( (row['video']).strip() == 'all' ) :
-                    mapmetric = float( (row['score']).strip() )
+
+        #
+        # INT2017.Video, INT2017.Image and VSD2015
+        #
+        if self.competitioncode in [0,1,2]:
+            with open(filename, mode='r') as f:
+                csv_reader = csv.DictReader(f, fieldnames=('metric', 'video', 'score'), delimiter = '\t')
+                for row in csv_reader :
+                    if ( (row['metric']).strip() == 'map' ) and ( (row['video']).strip() == 'all' ) :
+                        mapmetric = float( (row['score']).strip() )
+
+        #
+        # EMOAroval2018.Arousal and EMOAroval2018.Valence and EMOFear.2018
+        #
+        if self.competitioncode in [4,5, 6]:
+            with open(filename, mode='r') as f:
+                csv_reader = csv.DictReader(f, fieldnames=('score', 'empty'), delimiter=' ')
+                for row in csv_reader:
+                    mapmetric = float((row['score']))
                     
         return mapmetric
     
-    def processInterest_QrelsGtFilenames(self, filename):
+    def process_GtFilenames(self, filename):
         '''
-        loads all the INTERESTINGNESS filenames from the GT file
+        loads all the filenames from the GT file
         will be used to allign all the run files to the same order
+        this is mandatory as it will make sure that all samples have the runscores, therefore taking care of
+                incomplete runfiles
+
         @param filename: str: the file
         @return: filenames: list of str: list of the loaded (run)names
         '''
@@ -390,9 +521,10 @@ class FileHandler ():
         filenames = []
         self.gtscores = []
         self.gtpredictions = []
+        self.ioutypemaxlen = []
         
         #
-        # INT2017.Video or INT2017.Image
+        # INT2017.Video and INT2017.Image
         #
         if self.competitioncode == 1 or self.competitioncode == 0 :
             with open(filename, mode='r') as f:
@@ -428,13 +560,49 @@ class FileHandler ():
                 self.warnings += 1
                 self.warntext += 'WARNING!!! ... missmatch between the number of loaded and expected Ground Truth items for GT file   ' + filename
 
-            
+        #
+        # EMOAroval2018.Arousal and EMOAroval2018.Valence
+        #
+        if self.competitioncode == 4 or self.competitioncode == 5:
+            with open(filename, mode='r') as f:
+                csv_reader = csv.DictReader(f, fieldnames = ('samplename', 'valence', 'arousal'), delimiter = ',')
+                for row in csv_reader:
+                    line_counter += 1
+                    filenames.append(row['samplename'])
+                    if self.competitioncode == 4:
+                        self.gtpredictions.append(float(row['arousal']))
+                        self.gtscores.append(float(row['arousal']))
+                    if self.competitioncode == 5:
+                        self.gtpredictions.append(float(row['valence']))
+                        self.gtscores.append(float(row['valence']))
+
+            if (self.expectedsamples != line_counter) or (len(filenames) != self.expectedsamples):
+                self.warnings += 1
+                self.warntext += 'WARNING!!! ... missmatch between the number of loaded and expected Ground Truth items for GT file   ' + filename
+
+        #
+        # EMOFear2018
+        #
+        if self.competitioncode == 6:
+            with open(filename, mode='r') as f:
+                csv_reader = csv.DictReader(f, fieldnames=('samplename', 'score'), delimiter=',')
+                for row in csv_reader:
+                    line_counter += 1
+                    filenames.append(row['samplename'])
+                    self.gtpredictions.append(int(row['score']))
+                    self.gtscores.append(int(row['score']))
+
+            if (self.expectedsamples != line_counter) or (len(filenames) != self.expectedsamples):
+                self.warnings += 1
+                self.warntext += 'WARNING!!! ... missmatch between the number of loaded and expected Ground Truth items for GT file   ' + filename
+
         return filenames
     
-    
-    '''-------------
+    '''
+    -------------
     Run Collection & Vector handling functions
-    -------------'''
+    -------------
+    '''
     def updateRunCollection (self, name, metric, scores, minval, maxval, scoresnormed):
         '''
         Updates (add / edit) a list with all the runs 
@@ -490,12 +658,16 @@ class FileHandler ():
         newlist = []
         if sorttype == 1:
             newlist = sorted(collection, key = lambda x: x.runmetric, reverse=True)
+        elif sorttype == 0:
+            newlist = sorted(collection, key = lambda x: x.runmetric, reverse=False)
             
         return newlist    
 
-    '''-------------
+    '''
+    -------------
     Statistical and Math functions for calculating some helpful stuff
-    -------------'''
+    -------------
+    '''
     def normalizeScores(self, absmin, absmax, scores):
         '''
         Performs normalization in the absmin-absmax interval for a given vector
@@ -554,9 +726,11 @@ class FileHandler ():
                     
         return minimum
     
-    '''-------------
+    '''
+    -------------
     Values getter functions
-    -------------'''
+    -------------
+    '''
     def getScoresNormalized(self):
         scores = numpy.zeros((len(self.runcollection), len(self.runcollection[0].runscores_normed)))
         for i in range(len(self.runcollection)) :
@@ -587,6 +761,92 @@ class FileHandler ():
             preds[i] = self.gtpredictions[i]
             
         return preds
+    '''
+    -------------
+    Calculations for some basic metrics
+    -------------
+    '''
+    def calcPearsonCC(self, pred, gt):
+        '''
+        Calculates Pearson's Correlation Coefficient
+        '''
+        pcc = pearsonr(pred,gt)[0]
+        return pcc
+
+    def calcIoU(self, pred, gt):
+        '''
+        Calculate an overall IoU
+        '''
+
+        sampleI = numpy.array(pred).astype(int) & numpy.array(gt).astype(int)
+        sampleU = numpy.array(pred).astype(int) | numpy.array(gt).astype(int)
+
+        finiou = float(sampleI.sum()) / float(sampleU.sum())
+
+        return finiou
+
+    def calcIoUPerSample(self, pred, gt, mask):
+        '''
+        Calculate an overall IoU on a per sample base
+        '''
+        finiou = 0.0
+
+        filenames = list(self.gtfilenames[i] for i in mask)
+
+        listmovies = []
+        if self.competitioncode == 6:
+            listmovies = ['MEDIAEVAL18_54', 'MEDIAEVAL18_55', 'MEDIAEVAL18_56', 'MEDIAEVAL18_57', 'MEDIAEVAL18_58', 'MEDIAEVAL18_59', 'MEDIAEVAL18_60',
+                'MEDIAEVAL18_61', 'MEDIAEVAL18_62', 'MEDIAEVAL18_63', 'MEDIAEVAL18_64', 'MEDIAEVAL18_65', 'MEDIAEVAL18_66']
+
+        iousamples = []
+        for mov in listmovies:
+            index = [i for i, s in enumerate(filenames) if mov in s]
+            if len(index) > 0:
+                ypredsample = [pred[j] for j in index]
+                ygtsample = [gt[j] for j in index]
+                
+                sampleI = numpy.array(ypredsample).astype(int) & numpy.array(ygtsample).astype(int)
+                sampleU = numpy.array(ypredsample).astype(int) | numpy.array(ygtsample).astype(int)
+
+                if (sampleU.sum() > 0):
+                    iousamples.append(float(sampleI.sum()) / float(sampleU.sum()))
+                else:
+                    iousamples.append(1.0)
+
+        finiou = sum(iousamples) / len(iousamples)
+
+        return finiou
+
+    def calcIoUThresh(self, pred):
+        '''
+        Calculate the threshold for binary classification in an IoU scenario
+        '''
+        labels = list(self.getGtPredictions())
+        ones = labels.count(1.0)
+        tots = len(labels)
+        perc = float(ones)/float(tots)
+        pozsamples = int(float(len(pred))*float(perc))
+
+        pred_s = numpy.sort(pred,axis=None)[::-1]
+        return pred_s[pozsamples]
+    
+
+
+    '''
+    -------------
+    These are some junk functions that help with some pre-tasks (i.e. rewriting score files to be easier to handle)
+    -------------
+    '''
+    def junk_SaveNewtypeCsv(self, filename, junknames, junkval, junkaro):
+        '''
+        Rewriting the EMOAroval gt and pred files
+        '''
+        newfilename = filename + "new"
+        with open(newfilename, mode='w') as f:
+            for i in range(len(junknames)):
+                f.write(junknames[i] + "," + str(junkval[i]) + "," + str(junkaro[i]) + "\n")
+            f.close()
+        
         
 class RunDetails:
     '''

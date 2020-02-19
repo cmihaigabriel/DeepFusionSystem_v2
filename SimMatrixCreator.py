@@ -1,9 +1,14 @@
 '''
 Created on Jul 10, 2019
 
-Create a matrix that can be used in Conv1d and Conv2d ops
+Create a matrix that can be used in Conv1d and Conv2d and "special layer" ops
 
-@author: cmihaigabriel
+@author: cmihaigabriel@gmail.com
+@version: v2.1
+
+@change: v1.0 used in 2019 SI IJCV
+@change: v2.0 used in 2020 ICMR
+@change: v2.1 used in 2020 ECCV
 '''
 import numpy
 import scipy, scipy.stats.stats

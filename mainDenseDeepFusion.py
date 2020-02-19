@@ -2,10 +2,15 @@
 Created on Jul 9, 2019
 
 @author: cmihaigabriel
+@version: v2.1
+
+@change: v1.0 used in 2019 SI IJCV
+@change: v2.0 used in 2020 ICMR
+@change: v2.1 used in 2020 ECCV
 '''
 
-from LateFusionFileHandler import FileHandler
 import numpy as np
+from LateFusionFileHandler import FileHandler
 
 import keras
 import keras.backend as K
@@ -35,7 +40,7 @@ def runFusion(no_layers = -1, no_neurons = -1, database = -1, bn_active = 0, kfo
         matrixCreator = SimMatrixCreator()
 
     validation_mask = np.zeros((10,10))
-    finalmapfolds = []
+    finalMetricFolds = []
 
     ###########################
     # running the MLP algorithm
@@ -43,40 +48,69 @@ def runFusion(no_layers = -1, no_neurons = -1, database = -1, bn_active = 0, kfo
     # -*- coding: utf-8 -*-
 
     os.environ['TF_CPP_MIN_LOG_LEVEL']='2'  # suppress CPU msg
-    #os.environ['CUDA_VISIBLE_DEVICES']=gpudevice #selecting GPU device
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ['CUDA_VISIBLE_DEVICES'] = gpudevice  # selecting GPU device
+    #os.environ["CUDA_VISIBLE_DEVICES"] = "" #run in CPU mode
 
     class Settings(keras.callbacks.Callback):
         def on_train_begin(self, logs={}):
-            self.mAP = []
             self.losses = []
-            self.maxMAP = 0.0
+            self.Metric = []
+            self.maxMetric = 0.0
+            self.maxSecMetric = 0.0
+            if database in [4,5]:
+                self.maxMetric = 1.0
         
         def on_train_end(self, logs={}):
-            print('Max MAP = ' + str(self.maxMAP))
-            finalmapfolds.append(self.maxMAP)
+            print('Max Metric = ' + str(self.maxMetric) + ' Max Second Metric = ' + str(self.maxSecMetric))
+            finalMetricFolds.append([self.maxMetric, self.maxSecMetric])
+            avgsofar = np.mean(np.array(finalMetricFolds), axis=0)
+            print('AVG so far is: ' + str(avgsofar))
             return
 
         def on_epoch_begin(self, epoch, logs={}):
             return
 
         def on_epoch_end(self, epoch, logs={}):
-            self.losses.append(logs.get('loss'))
+            thisloss = logs.get('loss')
+            print ('loss = ' + str(thisloss))
+            self.losses.append(thisloss)
             y_pred = self.model.predict(self.validation_data[0], batch_size=None, verbose=1, steps=1)
-            self.loss_mapper(self.losses, y_pred)
+            self.loss_mapper(self.losses, y_pred, thisloss)
             return y_pred
 
-        def loss_mapper(self, losses, y_pred):
-            #self.mAP.append(serializer.saveFiles(y_pred[:,0], 'MLPS', input.shape[0]/2))
-            self.mAP.append(serializer.saveFiles(y_pred[:,0], 'MLPS', validation_mask))
-            print('Map:', self.mAP[-1:])
-            curmap = float(self.mAP[len(self.mAP) - 1])
-            if self.maxMAP < curmap:
-                #serializer.saveFiles(y_pred[:,0], 'MLPS_max', input.shape[0]/2)
-                self.mAP.append(serializer.saveFiles(y_pred[:,0], 'MLPS_max', validation_mask))
-                self.maxMAP = curmap
+        def loss_mapper(self, losses, y_pred, thisloss):
+            if database in [0,1,2]:
+                self.Metric.append(serializer.saveFiles(y_pred[:,0], 'MLPS', validation_mask))
+                print('Map:', self.Metric[-1:])
+                curmetric = float(self.Metric[len(self.Metric) - 1])
+                if self.maxMetric < curmetric:
+                    self.Metric.append(serializer.saveFiles(y_pred[:,0], 'MLPS_max', validation_mask))
+                    self.maxMetric = curmetric
+            elif database in [4,5]:
+                curmetric = thisloss
+                if self.maxMetric > curmetric: #it's > because it's MSE
+                    self.maxMetric = curmetric
+                    self.maxSecMetric = serializer.calcPearsonCC(y_pred,y_valid_cv)
+            elif database in [6]:
+                y_class = []
+                thresh = serializer.calcIoUThresh(y_pred)
+                for i in range(len(y_pred)):
+                    if (y_pred[i] < thresh):
+                        y_class.append(0)
+                    else:
+                        y_class.append(1)
+                curmetric = serializer.calcIoU(np.array(y_class), y_valid_cv)
+                cursecmetric = serializer.calcIoUPerSample(np.array(y_class), y_valid_cv, validation_mask)
+                print('Curmetric is ' + str(curmetric) + " CurSecmetric is " + str(cursecmetric))
+                if self.maxMetric < curmetric:
+                    self.maxMetric = curmetric
+                if self.maxSecMetric < cursecmetric:
+                    self.maxSecMetric = cursecmetric
+                
+            
             return
+
             
         def on_batch_begin(self, batch, logs={}):
             return
@@ -89,19 +123,25 @@ def runFusion(no_layers = -1, no_neurons = -1, database = -1, bn_active = 0, kfo
         reduce_lr_loss = ReduceLROnPlateau(monitor='loss', factor=0.1, patience=patience_lr, verbose=1, epsilon=1e-4, mode='min')
         return [mcp_save, reduce_lr_loss]
 
-    def load_data_kfold(x_train, y_train, k, rep = 1):
+    def load_data_kfold(x_train, y_train, k, rep = 1, database = 0):
         #folds = list(StratifiedKFold(n_splits=k, shuffle=False, random_state=42).split(x_train, y_train))
         #folds = list(StratifiedKFold(n_splits=k, shuffle=True, random_state=1).split(x_train, y_train))
-        folds = list(RepeatedStratifiedKFold(n_splits=k, n_repeats = rep, random_state=28).split(x_train, y_train))
+        if database in [0,1,2,6]:
+            folds = list(RepeatedStratifiedKFold(n_splits=k, n_repeats = rep, random_state=28).split(x_train, y_train))
+        if database in [4,5]:
+            folds = list(RepeatedKFold(n_splits=k, n_repeats = rep, random_state=28).split(x_train, y_train))
         return folds, x_train, y_train
 
+    def get_number_classes(database):
+        if database in [0,1,2,6]:
+            return 1
+        if database in [4,5]:
+            return 1
+        return 1
 
-    folds, x_train, y_train = load_data_kfold(input, labels, kfolds, repeatfolds)
-    
-    print(x_train.shape[0], 'train samples')
-    num_classes = 1
     def get_model_seq():
         model = Sequential()
+
         if convLayer > 0:
             model.add(Convolution1D(convLayer, 3, border_mode='same', input_shape=(x_train_cv.shape[1], x_train_cv.shape[2])))
             model.add(AveragePooling1D(pool_size=3))
@@ -122,7 +162,13 @@ def runFusion(no_layers = -1, no_neurons = -1, database = -1, bn_active = 0, kfo
 
         model.summary()
         adam = optimizers.adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0, amsgrad=False)
-        model.compile(optimizer=adam, loss='binary_crossentropy', metrics=['accuracy'])
+        if database in [0,1,2,6]:
+            model.compile(optimizer=adam, loss='binary_crossentropy', metrics=['accuracy'])
+        elif database in [4,5]:
+            model.compile(optimizer=adam, loss='mean_squared_error')
+        else:
+            model.compile(optimizer=adam, loss='binary_crossentropy', metrics=['accuracy'])
+
         return model
 
     def get_model_attntype():
@@ -146,10 +192,21 @@ def runFusion(no_layers = -1, no_neurons = -1, database = -1, bn_active = 0, kfo
 
         model = Model(input=[input_layer], output=attention_mul)
         adam = optimizers.adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0, amsgrad=False)
-        model.compile(optimizer=adam, loss='binary_crossentropy', metrics=['accuracy'])
+        if database in [0,1,2,6]:
+            model.compile(optimizer=adam, loss='binary_crossentropy', metrics=['accuracy'])
+        elif database in [4,5]:
+            model.compile(optimizer=adam, loss='mean_squared_error')
+        else:
+            model.compile(optimizer=adam, loss='binary_crossentropy', metrics=['accuracy'])
+
         model.summary()
         return model
 
+
+    folds, x_train, y_train = load_data_kfold(input, labels, kfolds, repeatfolds, database)
+    
+    print(x_train.shape[0], 'train samples')
+    num_classes = get_number_classes(database)
 
     for j, (train_idx, val_idx) in enumerate(folds):
     
@@ -183,39 +240,7 @@ def runFusion(no_layers = -1, no_neurons = -1, database = -1, bn_active = 0, kfo
                             callbacks=[settings])
         K.clear_session()
 
-    """
-    print('Final MAP values after folds are:')
-    for i in range(len(finalmapfolds)):
-        print('Fold ' + str(i) + ' = ' + str(finalmapfolds[i]))
-    print('Mean MAP = ' + str(np.mean(np.array(finalmapfolds))))
-    """
-    return np.mean(np.array(finalmapfolds))
-
-
-"""
-# serialize model to JSON
-model = model.to_json()
-with open("model.json", "w") as json_file:
-    json_file.write(model)
-# serialize weights to HDF5
-model.save_weights("model.h5")
-print("Saved model to disk")
- 
-# load json and create model
-json_file = open('model.json', 'r')
-model = json_file.read()
-json_file.close()
-model = model_from_json(model)
-# load weights into new model
-model.load_weights("model.h5")
-print("Loaded model from disk")
-
-np.set_printoptions(precision=4, suppress=True)
-eval_results = model.evaluate(x_test, y_test, verbose=0) 
-print("\nLoss, accuracy on test data: ")
-print("%0.4f %0.2f%%" % (eval_results[0], 
-  eval_results[1]*100))
-"""
+    return np.mean(np.array(finalMetricFolds), axis=0)
     
 
 def SetupFileHandler(ser, type):
@@ -228,11 +253,16 @@ def SetupFileHandler(ser, type):
         0 - INT2017.Video 
         1 - INT2017.Image
         2 - VSD2015
+        3 - MEDCapt2019 ???
+        4 - EMOAroval2018.Arousal
+        5 - EMOAroval2018.Valence
+        6 - EMOFear2018
     '''
-    
+
+    #####INT2017.Video
     if (type == 0):
         ser.setup('../DataSources/MediaEvalInterestingness/INT2017.Video/SortedRuns/2017Movies',    #runfolder
-                    '../FusionResults0/',    #output folder - no longer used
+                    '../FusionCache/FusionResults0/',    #output folder - no longer used
                     'conINT2017Video',      #output filenames - no longer used
                     '../DataSources/MediaEvalInterestingness/INT2017.Video/SortedRuns/GTFiles/testset-2017-video.qrels',    #gt file 
                     '../DataSources/MediaEvalInterestingness/INT2017.Video/treceval/trec_eval',       #eval tool path
@@ -240,9 +270,10 @@ def SetupFileHandler(ser, type):
                     42,     #number of runs
                     1,      #metric used
                     0)      #competition code
+    #####INT2017.Image
     if (type == 1):
         ser.setup('../DataSources/MediaEvalInterestingness/INT2017.Image/SortedRuns/2017Image', 
-                    '../FusionResults1/',
+                    '../FusionCache/FusionResults1/',
                     'conINT2017Image',
                     '../DataSources/MediaEvalInterestingness/INT2017.Image/SortedRuns/GTFiles/testset-2017-image.qrels', 
                     '../DataSources/MediaEvalInterestingness/INT2017.Image/treceval/trec_eval',
@@ -250,9 +281,10 @@ def SetupFileHandler(ser, type):
                     33,
                     1,
                     1)
+    #####VSD2015
     if (type == 2):
         ser.setup('../DataSources/MediaEvalViolence/VSD2015/SortedRuns',
-                    '../FusionResults2/',
+                    '../FusionCache/FusionResults2/',
                     'conVSD2015',
                     '../DataSources/MediaEvalViolence/VSD2015/GT/violence.qrel',
                     '../DataSources/MediaEvalViolence/VSD2015/EvalTool/trec_eval',
@@ -260,3 +292,47 @@ def SetupFileHandler(ser, type):
                     48,
                     0,
                     2)
+    #####MEDCapt2019
+    if (type == 3):
+        ser.setup('../DataSources/ImageCLEFMedical/MEDCapt2019',
+                  '../FusionCache/FusionResults3/',
+                  'conMEDCapt2019',
+                  '../DataSources/ImageCLEFMedical/MEDCapt2019/GT/ConceptDetection_GT.txt',
+                  '../DataSources/ImageCLEFMedical/MEDCapt2019/EvalTool/evaluate-f1.py',
+                  10000,    #number of samples
+                  63,       #number of runs
+                  2,        #metric used
+                  3)        #competition code
+    #####EMOAroval2019.Arousal
+    if (type == 4):
+        ser.setup('../DataSources/MediaEvalEmotions/EMOAroval2018/SortedRuns',
+                  '../FusionCache/FusionResults4/',
+                  'conEMOAroval2019Arousal',
+                  '../DataSources/MediaEvalEmotions/EMOAroval2018/GT/MediaEvalEmo-Valence-Arousal.txt',
+                  '../DataSources/MediaEvalEmotions/EMOAroval2018/EvalTool/compute_results_subtask1.py',
+                  32196,    #number of samples
+                  30,       #number of runs
+                  3,        #metric used
+                  4)        #competition code
+    #####EMOAroval2019.Valence
+    if (type == 5):
+        ser.setup('../DataSources/MediaEvalEmotions/EMOAroval2018/SortedRuns',
+                  '../FusionCache/FusionResults5/',
+                  'conEMOAroval2019Valence',
+                  '../DataSources/MediaEvalEmotions/EMOAroval2018/GT/MediaEvalEmo-Valence-Arousal.txt',
+                  '../DataSources/MediaEvalEmotions/EMOAroval2018/EvalTool/compute_results_subtask1.py',
+                  32196,    #number of samples
+                  30,       #number of runs
+                  3,        #metric used
+                  5)        #competition code
+    #####EMOFear2019
+    if (type == 6):
+        ser.setup('../DataSources/MediaEvalEmotions/EMOFear2018/SortedRuns',
+                  '../FusionCache/FusionResults6/',
+                  'conEMOFear2019',
+                  '../DataSources/MediaEvalEmotions/EMOFear2018/GT/fear_gt_mod2.txt',
+                  '../DataSources/MediaEvalEmotions/EMOFear2018/EvalTool/compute_results_subtask2.py',
+                  32146,    #number of samples
+                  18,       #number of runs
+                  4,        #metric used
+                  6)        #competition code
