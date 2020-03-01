@@ -16,7 +16,7 @@ from collections import namedtuple
 
 class SimMatrixCreator ():
     
-    def getMatrix_CF32_4N4S4C(self, trainmatrix, testmatrix):
+    def getMatrix_CSF32_4N4S4C(self, trainmatrix, testmatrix, metric = 0):
         (htrain, wtrain) = trainmatrix.shape
         (htest, wtest) = testmatrix.shape
         
@@ -25,7 +25,7 @@ class SimMatrixCreator ():
         
         for i in range(0, wtrain):
             corevector = trainmatrix[:, i]
-            rlist = self.createPearsonRList(corevector, trainmatrix, i);
+            rlist = self.createPearsonRList(corevector, trainmatrix, i, metric)
             
             for j in range(0, htrain):
                 newtrainmatrix[j][3*i + 0][0][1] = trainmatrix[j][rlist[0][0]]
@@ -91,7 +91,7 @@ class SimMatrixCreator ():
                 
         return (newtrainmatrix, newtestmatrix)
     
-    def getMatrix_CF32_8N8S8C(self, trainmatrix, testmatrix):
+    def getMatrix_CSF32_8N8S8C(self, trainmatrix, testmatrix, metric = 0):
         (htrain, wtrain) = trainmatrix.shape
         (htest, wtest) = testmatrix.shape
         
@@ -100,7 +100,7 @@ class SimMatrixCreator ():
         
         for i in range(0, wtrain):
             corevector = trainmatrix[:, i]
-            rlist = self.createPearsonRList(corevector, trainmatrix, i);
+            rlist = self.createPearsonRList(corevector, trainmatrix, i, metric);
             
             for j in range(0, htrain):
                 newtrainmatrix[j][3*i + 0][0][1] = trainmatrix[j][rlist[0][0]]
@@ -226,7 +226,7 @@ class SimMatrixCreator ():
         
         return (newtrainmatrix, newtestmatrix)
     
-    def createPearsonRList (self, corevector, trainmatrix, i):
+    def createPearsonRList (self, corevector, trainmatrix, i, metric):
         '''
         Create the Pearson R Correlation between a vector and a list
         '''
@@ -237,10 +237,18 @@ class SimMatrixCreator ():
                     continue
                 else:
                     compvector = trainmatrix[:, j]
-                    (rvalue, pvalue) = scipy.stats.stats.pearsonr(corevector, compvector)
-                    
-                    rlist.append((j, rvalue))
-                    
+                    if metric == 0:
+                        (rvalue, pvalue) = scipy.stats.stats.pearsonr(corevector, compvector)
+                        rlist.append((j, rvalue))
+                    if metric == 1:
+                        #(rvalue, pvalue) = scipy.stats.stats.pearsonr(corevector, compvector)
+                        sampleI = numpy.array(corevector).astype(int) & numpy.array(compvector).astype(int)
+                        sampleU = numpy.array(corevector).astype(int) | numpy.array(compvector).astype(int)
+
+                        rvalue = float(sampleI.sum()) / float(sampleU.sum())
+                        
+                        rlist.append((j, rvalue))
+
         rlist = sorted(rlist, key=lambda tup: tup[1], reverse=True)
         
         return rlist
