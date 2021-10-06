@@ -1,5 +1,5 @@
 # DeepFusionSystem_v2
-This code coresponds to the DeepFusion ensembling methods presented, either in their entirety or incrementally, as parts of the methods in the following papers:
+This code coresponds to the DeepFusion ensembling methods presented, either in their entirety or incrementally (as parts of the methods) in the following papers:
 
 * (upcoming paper, estimated publication date: Oct-Nov 2021) Constantin, M.G., Ştefan, L.D., Ionescu, B. (est. 2021, Oct-Nov). Exploring Deep Fusion Ensembling for Automatic Visual Interestingness Prediction. In book Human Perception of Visual Information - Psychological and Computational Perspectives, Springer International Publishing, Eds. B. Ionescu, W. Bainbridge, N. Murray.
 * Constantin, M. G., Ştefan, L. D., & Ionescu, B. (2021, June). DeepFusion: Deep Ensembles for Domain Independent System Fusion. In International Conference on Multimedia Modeling (pp. 240-252). Springer, Cham.
